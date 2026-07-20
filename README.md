@@ -34,8 +34,16 @@ Go to **Settings → Secrets and variables → Actions → Variables** and add:
 | `BMS_DATES` | Dates to monitor (YYYYMMDD, comma-separated). Leave empty to auto-detect from URL. | `20260318,20260319` |
 | `BMS_THEATRE` | Filter by theatre name (substring match, comma-separated) | `PVR,IMAX` |
 | `BMS_TIME` | Filter by time period (comma-separated) | `evening,night` |
+| `BMS_SCREEN` | Filter by screen/format (substring match, comma-separated) | `PCX,IMAX` |
 
 **Time periods:** `morning` (6–12), `afternoon` (12–16), `evening` (16–19), `night` (19–24)
+
+**Watching a date that hasn't opened yet:** set `BMS_DATES` to the future date
+(e.g. `20260801`). Only that date is tracked, and you get a `NEW DATE OPENED`
+alert the moment BMS lists it — including when it jumps straight from
+absent-from-the-date-strip to bookable. While you wait, each run logs the
+venues, screens and dates BMS actually returned, so a typo in
+`BMS_THEATRE`/`BMS_SCREEN` shows up as a warning instead of silence.
 
 ### 4. Trigger the workflow
 
@@ -52,6 +60,7 @@ export BMS_URL="https://in.bookmyshow.com/movies/chennai/.../ET00123456"
 export BMS_DATES="20260318,20260319"
 export BMS_THEATRE="PVR"
 export BMS_TIME="evening,night"
+export BMS_SCREEN="PCX"
 export RESEND_API_KEY="re_..."
 export RESEND_TO_EMAIL="you@example.com"
 export RESEND_TO_EMAIL="python@resend.dev"

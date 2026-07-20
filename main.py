@@ -27,6 +27,7 @@ CONFIG = {
     "dates": os.getenv("BMS_DATES", ""),          # comma-separated YYYYMMDD, empty = from URL
     "theatre": os.getenv("BMS_THEATRE", ""),       # substring filter, empty = all
     "time_period": os.getenv("BMS_TIME", ""),      # e.g. "evening,night", empty = all
+    "screen": os.getenv("BMS_SCREEN", ""),         # e.g. "PCX,IMAX", empty = all
 }
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
@@ -49,6 +50,15 @@ DATE_STYLE_MAP = {
     "date-selected": "BOOKABLE",
     "date-disabled": "NOT_OPEN",
     "date-default":  "AVAILABLE",
+}
+
+# How "open" each date status is, for reconciling the same date seen twice.
+DATE_OPENNESS = {
+    "NOT_LISTED": 0,
+    "UNKNOWN":    1,
+    "NOT_OPEN":   2,
+    "AVAILABLE":  3,
+    "BOOKABLE":   4,
 }
 
 TIME_PERIODS = {
@@ -90,7 +100,18 @@ class ShowInfo:
     time: str
     time_code: str
     screen_attr: str
+    screen_name: str = ""
     categories: list[CatInfo] = field(default_factory=list)
+
+    def screen_haystack(self):
+        """Lowercased text to match BMS_SCREEN against.
+
+        BMS puts the format label in different places depending on the
+        venue, so match against every screen-ish field we captured.
+        """
+        return " ".join(
+            p for p in (self.screen_attr, self.screen_name) if p
+        ).lower()
 
 @dataclass
 class DateInfo:
@@ -250,6 +271,8 @@ def parse_shows(data):
                         time_code=sa.get("showTimeCode", ""),
                         screen_attr=(st.get("screenAttr", "")
                                      or sa.get("attributes", "")),
+                        screen_name=(sa.get("screenName", "")
+                                     or sa.get("screen", "")),
                     )
                     for cat in sa.get("categories", []):
                         ca = str(cat.get("availStatus", ""))
@@ -266,14 +289,63 @@ def parse_shows(data):
 # ──────────────────────────────────────────────────────────────────────
 # FILTERING
 # ──────────────────────────────────────────────────────────────────────
-def filter_shows(shows, theatre_filter, time_periods, date_codes):
+def warn_empty_filter(all_shows):
+    """Show what BMS actually returned when the filters match nothing.
+
+    Filters matching nothing is expected while a future date is still closed,
+    but it is also what a typo in BMS_THEATRE/BMS_SCREEN looks like — and that
+    failure is silent. Print the real values so the run log can tell them apart.
+    """
+    print("  ⚠️  Filters matched 0 of "
+          f"{len(all_shows)} showtime(s). Values seen in the feed:")
+
+    theatre_kws = [k.strip().lower() for k in CONFIG["theatre"].split(",")
+                   if k.strip()]
+    in_theatre = [
+        s for s in all_shows
+        if not theatre_kws
+        or any(k in s.venue_name.lower() for k in theatre_kws)
+    ]
+
+    venues = sorted({s.venue_name for s in all_shows})
+    print(f"     venues ({len(venues)}): {', '.join(venues[:8])}")
+
+    if theatre_kws and not in_theatre:
+        print(f"     ❗ BMS_THEATRE={CONFIG['theatre']!r} matched no venue.")
+        return
+
+    scope = "matching venues" if theatre_kws else "all venues"
+    screens = sorted({s.screen_haystack() for s in in_theatre if
+                      s.screen_haystack()})
+    print(f"     screens at {scope}: {', '.join(screens) or '(none reported)'}")
+    dates = sorted({s.date_code for s in in_theatre if s.date_code})
+    print(f"     dates at {scope}: {', '.join(dates)}")
+
+    if CONFIG["screen"] and screens and not any(
+        sc.strip().lower() in h
+        for sc in CONFIG["screen"].split(",") if sc.strip()
+        for h in screens
+    ):
+        print(f"     ❗ BMS_SCREEN={CONFIG['screen']!r} matched none of the "
+              f"above. If the target date is open, this is a config error.")
+
+
+def parse_date_codes(date_codes):
+    if not date_codes:
+        return set()
+    return set(d.strip() for d in date_codes.split(",") if d.strip())
+
+
+def filter_shows(shows, theatre_filter, time_periods, date_codes,
+                 screen_filter=""):
     result = []
     kws = [k.strip().lower() for k in theatre_filter.split(",")
            if k.strip()] if theatre_filter else []
     periods = [p.strip().lower() for p in time_periods.split(",")
                if p.strip()] if time_periods else []
-    dates_set = set(d.strip() for d in date_codes.split(",")
-                    if d.strip()) if date_codes else set()
+    dates_set = parse_date_codes(date_codes)
+    screens = [s.strip().lower() for s in screen_filter.split(",")
+               if s.strip()] if screen_filter else []
 
     for s in shows:
         # Theatre filter
@@ -285,6 +357,12 @@ def filter_shows(shows, theatre_filter, time_periods, date_codes):
         # Date filter
         if dates_set and s.date_code and s.date_code not in dates_set:
             continue
+
+        # Screen / format filter (e.g. PCX, IMAX)
+        if screens:
+            haystack = s.screen_haystack()
+            if not any(sc in haystack for sc in screens):
+                continue
 
         # Time period filter
         if periods:
@@ -322,8 +400,13 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 
-def build_state(shows, dates):
-    """Build a comparable state dict."""
+def build_state(shows, dates, watched_dates=None):
+    """Build a comparable state dict.
+
+    When watched_dates is set, only those dates are tracked — otherwise the
+    date strip rolling forward one day would look like a new date opening
+    on every single run.
+    """
     show_state = {}
     for s in shows:
         for c in s.categories:
@@ -337,9 +420,22 @@ def build_state(shows, dates):
                 "status": c.status,
             }
 
-    date_state = {
-        d.date_code: d.status for d in dates
-    }
+    # We fetch more than one view, so the same date can arrive twice with
+    # different statuses. Keep the most-open one — a stale or degraded view
+    # must never mask a date that has actually opened.
+    date_state = {}
+    for d in dates:
+        if watched_dates and d.date_code not in watched_dates:
+            continue
+        known = date_state.get(d.date_code)
+        if known is None or DATE_OPENNESS.get(d.status, 0) > DATE_OPENNESS.get(
+                known, 0):
+            date_state[d.date_code] = d.status
+
+    # A watched date BMS hasn't listed yet is tracked explicitly, so that its
+    # first appearance registers as a change rather than as a brand-new key.
+    for dc in (watched_dates or set()):
+        date_state.setdefault(dc, "NOT_LISTED")
 
     return {"shows": show_state, "dates": date_state}
 
@@ -347,12 +443,13 @@ def build_state(shows, dates):
 def detect_changes(old_state, new_state):
     changes = []
 
-    # New dates opening
+    # New dates opening. A date can go from absent-from-the-strip straight to
+    # bookable, so anything that wasn't already open counts as opening.
     old_dates = old_state.get("dates", {})
     new_dates = new_state.get("dates", {})
+    CLOSED = (None, "NOT_OPEN", "NOT_LISTED", "UNKNOWN")
     for dc, status in new_dates.items():
-        old_status = old_dates.get(dc)
-        if (old_status == "NOT_OPEN"
+        if (old_dates.get(dc) in CLOSED
                 and status in ("BOOKABLE", "AVAILABLE")):
             changes.append(f"📅 NEW DATE OPENED: {dc}")
 
@@ -395,8 +492,15 @@ def send_email(subject, changes, shows, movie_info):
     frm = RESEND_FROM_EMAIL.strip() or "onboarding@resend.dev"
 
     if not api_key or not to:
-        print("  ⚠️  Skipping email — RESEND_API_KEY or RESEND_TO_EMAIL not set.")
-        return
+        # Hard failure, not a skip. State is already written, so returning
+        # quietly would consume the change and never report it again — the
+        # alert would be lost precisely when there was something to say.
+        # Exiting non-zero keeps the run from committing state, so the next
+        # run re-detects and retries.
+        print("  ❌ Have changes to report but RESEND_API_KEY or "
+              "RESEND_TO_EMAIL is not set. Alert LOST — failing so the "
+              "state is not committed and the next run retries.")
+        sys.exit(1)
 
     now_str = datetime.now().strftime("%d %b %Y, %I:%M %p")
     movie_name = movie_info.get("name", "Movie")
@@ -542,10 +646,13 @@ def main():
         region_slug
     )
 
-    # Determine dates to check
+    # Determine dates to check. The default view ("") is always fetched first:
+    # querying a dateCode that has not opened yet can come back empty, and that
+    # view is the only reliable source of the date strip we watch for openings.
     raw_dates = CONFIG["dates"].strip()
     if raw_dates:
-        date_list = [d.strip() for d in raw_dates.split(",") if d.strip()]
+        date_list = [""] + [d.strip() for d in raw_dates.split(",")
+                            if d.strip()]
     elif url_date:
         date_list = [url_date]
     else:
@@ -559,12 +666,14 @@ def main():
     all_dates = []
     movie_info = {"name": "Unknown", "language": ""}
 
+    ok_fetches = 0
     for dc in date_list:
         data = fetch_bms(event_code, dc, region_code,
                          region_slug_r, lat, lon, geohash)
         if not data:
             print(f"  ⚠️  No data for date {dc or '(default)'}")
             continue
+        ok_fetches += 1
 
         if movie_info["name"] == "Unknown":
             movie_info = parse_movie_info(data)
@@ -572,9 +681,21 @@ def main():
         all_dates.extend(parse_dates(data))
         all_shows.extend(parse_shows(data))
 
-    if not all_shows:
-        print("  ❌ No showtimes found.")
-        sys.exit(0)
+    # Exit non-zero so the run goes red and GitHub emails about it. A watcher
+    # that cannot reach BMS is broken, but silently returns "nothing to
+    # report" — indistinguishable from a healthy run that found no changes.
+    if not ok_fetches:
+        print("  ❌ Every BMS request failed — the watcher is NOT working. "
+              "Check for blocking/rate-limiting or a changed API.")
+        sys.exit(1)
+
+    if not all_dates:
+        print("  ❌ Reached BMS but got no date strip — the API shape may "
+              "have changed. Cannot detect a date opening.")
+        sys.exit(1)
+
+    # Zero shows is normal while waiting for a future date to open: we still
+    # have the date strip, so the opening is detectable.
 
     print(f"  🎬 {movie_info['name']}  {movie_info['language']}")
 
@@ -584,11 +705,26 @@ def main():
         CONFIG["theatre"],
         CONFIG["time_period"],
         CONFIG["dates"],
+        CONFIG["screen"],
     )
+    # The default view and the targeted view can return the same showtime.
+    seen = set()
+    deduped = []
+    for s in filtered:
+        key = (s.venue_code, s.session_id, s.date_code, s.time)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(s)
+    filtered = deduped
+
     print(f"  📊 {len(filtered)} showtime(s) after filters")
 
+    if all_shows and not filtered:
+        warn_empty_filter(all_shows)
+
     # Build state & detect changes
-    new_state = build_state(filtered, all_dates)
+    watched_dates = parse_date_codes(CONFIG["dates"])
+    new_state = build_state(filtered, all_dates, watched_dates)
     old_state = load_state()
 
     changes = []
