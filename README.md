@@ -38,6 +38,21 @@ Go to **Settings → Secrets and variables → Actions → Variables** and add:
 
 **Time periods:** `morning` (6–12), `afternoon` (12–16), `evening` (16–19), `night` (19–24)
 
+**Watching several targets at once:** the flat `BMS_*` vars describe a single
+filter set, so two unrelated targets would match their cross-product. Set
+`BMS_WATCHES` to a JSON array instead — each entry is filtered and tracked
+independently, and alerts name the watch that fired:
+
+```json
+[
+  {"name": "pcx-aug1",    "dates": "20260801", "theatre": "Prasads", "screen": "PCX"},
+  {"name": "dolby-jul28", "dates": "20260728", "theatre": "ALLU",    "screen": "DOLBY CINEMA"}
+]
+```
+
+Names must be unique — state is keyed by them. `BMS_WATCHES` overrides the
+flat vars entirely.
+
 **Watching a date that hasn't opened yet:** set `BMS_DATES` to the future date
 (e.g. `20260801`). Only that date is tracked, and you get a `NEW DATE OPENED`
 alert the moment BMS lists it — including when it jumps straight from

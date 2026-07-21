@@ -290,17 +290,54 @@ def parse_shows(data):
 # ──────────────────────────────────────────────────────────────────────
 # FILTERING
 # ──────────────────────────────────────────────────────────────────────
-def warn_empty_filter(all_shows):
+def parse_watches():
+    """Return the list of independent watches to check.
+
+    BMS_WATCHES is a JSON array, one object per watch, so that unrelated
+    targets ("PCX on Aug 1", "Dolby on Jul 28") stay separate instead of
+    being combined into one filter set that would match their cross-product.
+    Falls back to the flat BMS_* vars when unset.
+    """
+    raw = os.getenv("BMS_WATCHES", "").strip()
+    if not raw:
+        return [{
+            "name": "default",
+            "dates": CONFIG["dates"],
+            "theatre": CONFIG["theatre"],
+            "screen": CONFIG["screen"],
+            "time": CONFIG["time_period"],
+        }]
+
+    watches = []
+    for i, w in enumerate(json.loads(raw)):
+        watches.append({
+            "name": str(w.get("name") or f"watch{i + 1}"),
+            "dates": str(w.get("dates", "")),
+            "theatre": str(w.get("theatre", "")),
+            "screen": str(w.get("screen", "")),
+            "time": str(w.get("time", "")),
+        })
+    if not watches:
+        raise ValueError("BMS_WATCHES is an empty list")
+
+    names = [w["name"] for w in watches]
+    if len(set(names)) != len(names):
+        # State is keyed by name, so duplicates would silently share a slice.
+        raise ValueError(f"BMS_WATCHES has duplicate names: {names}")
+    return watches
+
+
+def warn_empty_filter(all_shows, watch):
     """Show what BMS actually returned when the filters match nothing.
 
     Filters matching nothing is expected while a future date is still closed,
-    but it is also what a typo in BMS_THEATRE/BMS_SCREEN looks like — and that
+    but it is also what a typo in a theatre/screen filter looks like — and that
     failure is silent. Print the real values so the run log can tell them apart.
     """
-    print("  ⚠️  Filters matched 0 of "
+    print("     ⚠️  matched 0 of "
           f"{len(all_shows)} showtime(s). Values seen in the feed:")
 
-    theatre_kws = [k.strip().lower() for k in CONFIG["theatre"].split(",")
+    theatre_kws = [k.strip().lower() for k in watch["theatre"].split(",")
                    if k.strip()]
     in_theatre = [
         s for s in all_shows
@@ -312,7 +349,7 @@ def warn_empty_filter(all_shows):
     print(f"     venues ({len(venues)}): {', '.join(venues[:8])}")
 
     if theatre_kws and not in_theatre:
-        print(f"     ❗ BMS_THEATRE={CONFIG['theatre']!r} matched no venue.")
+        print(f"     ❗ theatre={watch['theatre']!r} matched no venue.")
         return
 
     scope = "matching venues" if theatre_kws else "all venues"
@@ -322,12 +359,12 @@ def warn_empty_filter(all_shows):
     dates = sorted({s.date_code for s in in_theatre if s.date_code})
     print(f"     dates at {scope}: {', '.join(dates)}")
 
-    if CONFIG["screen"] and screens and not any(
+    if watch["screen"] and screens and not any(
         sc.strip().lower() in h
-        for sc in CONFIG["screen"].split(",") if sc.strip()
+        for sc in watch["screen"].split(",") if sc.strip()
         for h in screens
     ):
-        print(f"     ❗ BMS_SCREEN={CONFIG['screen']!r} matched none of the "
+        print(f"     ❗ screen={watch['screen']!r} matched none of the "
               f"above. If the target date is open, this is a config error.")
 
 
@@ -629,12 +666,12 @@ def send_email(subject, changes, shows, movie_info):
 # ──────────────────────────────────────────────────────────────────────
 # MAIN
 # ──────────────────────────────────────────────────────────────────────
-def check_once(event_code, region, date_list, old_state):
-    """Run one poll.
+def check_once(event_code, region, date_list, watches, old_state):
+    """Run one poll across every watch.
 
-    Returns the new state, or None if BMS could not be read this time. A
-    None is transient by itself — the caller decides when repeated failures
-    mean the watcher is actually broken.
+    Returns the new state keyed by watch name, or None if BMS could not be
+    read this time. A None is transient by itself — the caller decides when
+    repeated failures mean the watcher is actually broken.
     """
     region_code, region_slug_r, lat, lon, geohash = region
 
@@ -673,60 +710,59 @@ def check_once(event_code, region, date_list, old_state):
 
     print(f"  🎬 {movie_info['name']}  {movie_info['language']}")
 
-    # Apply filters
-    filtered = filter_shows(
-        all_shows,
-        CONFIG["theatre"],
-        CONFIG["time_period"],
-        CONFIG["dates"],
-        CONFIG["screen"],
-    )
-    # The default view and the targeted view can return the same showtime.
-    seen = set()
-    deduped = []
-    for s in filtered:
-        key = (s.venue_code, s.session_id, s.date_code, s.time)
-        if key not in seen:
-            seen.add(key)
-            deduped.append(s)
-    filtered = deduped
+    # Each watch filters the same fetched data independently, so watching
+    # "PCX on Aug 1" and "Dolby on Jul 28" cannot bleed into each other the
+    # way a single combined filter set would.
+    new_state = {}
+    for w in watches:
+        filtered = filter_shows(
+            all_shows, w["theatre"], w["time"], w["dates"], w["screen"],
+        )
+        # The default view and a targeted view can return the same showtime.
+        seen = set()
+        deduped = []
+        for s in filtered:
+            key = (s.venue_code, s.session_id, s.date_code, s.time)
+            if key not in seen:
+                seen.add(key)
+                deduped.append(s)
+        filtered = deduped
 
-    print(f"  📊 {len(filtered)} showtime(s) after filters")
+        print(f"  ── {w['name']}: {len(filtered)} showtime(s) after filters")
 
-    if all_shows and not filtered:
-        warn_empty_filter(all_shows)
+        if all_shows and not filtered:
+            warn_empty_filter(all_shows, w)
 
-    # Build state & detect changes
-    watched_dates = parse_date_codes(CONFIG["dates"])
-    new_state = build_state(filtered, all_dates, watched_dates)
+        watched_dates = parse_date_codes(w["dates"])
+        slice_new = build_state(filtered, all_dates, watched_dates)
+        new_state[w["name"]] = slice_new
 
-    changes = []
-    if old_state:
-        changes = detect_changes(old_state, new_state)
+        slice_old = (old_state or {}).get(w["name"])
+        changes = detect_changes(slice_old, slice_new) if slice_old else []
+
+        if changes:
+            print(f"\n  ⚡ {w['name']}: {len(changes)} change(s) detected:")
+            for c in changes:
+                print(f"     {c}")
+            send_email(
+                f"BMS Alert: {movie_info['name']} ({w['name']}) — "
+                f"{len(changes)} change(s)",
+                changes, filtered, movie_info,
+            )
+        else:
+            print(f"     ✅ no changes")
+
+        for s in filtered:
+            cats = ", ".join(
+                f"{c.name}=₹{c.price}"
+                f"({AVAIL_STATUS_MAP.get(c.status, ('?', ''))[0]})"
+                for c in s.categories
+            )
+            fmt = f"|{s.screen_attr}" if s.screen_attr else ""
+            print(f"     {s.venue_name} — {s.time}{fmt} "
+                  f"[{s.date_code}] — {cats}")
 
     save_state(new_state)
-
-    if changes:
-        print(f"\n  ⚡ {len(changes)} change(s) detected:")
-        for c in changes:
-            print(f"     {c}")
-        send_email(
-            f"BMS Alert: {movie_info['name']} - {len(changes)} change(s)",
-            changes, filtered, movie_info,
-        )
-    else:
-        print("  ✅ No changes since last check.")
-
-    # Print current status
-    print(f"\n  Current status ({len(filtered)} shows):")
-    for s in filtered:
-        cats = ", ".join(
-            f"{c.name}=₹{c.price}({AVAIL_STATUS_MAP.get(c.status, ('?',''))[0]})"
-            for c in s.categories
-        )
-        fmt = f"|{s.screen_attr}" if s.screen_attr else ""
-        print(f"    {s.venue_name} — {s.time}{fmt} [{s.date_code}] — {cats}")
-
     return new_state
 
 
@@ -750,19 +786,27 @@ def main():
 
     region = resolve_region(region_slug)
 
-    # Determine dates to check. The default view ("") is always fetched first:
-    # querying a dateCode that has not opened yet can come back empty, and that
-    # view is the only reliable source of the date strip we watch for openings.
-    raw_dates = CONFIG["dates"].strip()
-    if raw_dates:
-        date_list = [""] + [d.strip() for d in raw_dates.split(",")
-                            if d.strip()]
+    watches = parse_watches()
+
+    # Fetch the union of every watch's dates once, then let each watch filter
+    # that shared result. The default view ("") is always included: querying a
+    # dateCode that has not opened yet can come back empty, and that view is
+    # the only reliable source of the date strip we watch for openings.
+    wanted = set()
+    for w in watches:
+        wanted |= parse_date_codes(w["dates"])
+    if wanted:
+        date_list = [""] + sorted(wanted)
     elif url_date:
         date_list = [url_date]
     else:
         date_list = [""]
 
     print(f"  Event: {event_code}  Region: {region[0]}  Dates: {date_list}")
+    for w in watches:
+        print(f"    watch {w['name']}: dates={w['dates'] or 'any'} "
+              f"theatre={w['theatre'] or 'any'} "
+              f"screen={w['screen'] or 'any'}")
 
     # GitHub's scheduler will not start runs at the interval it is asked for
     # (measured: gaps of 1–4h against a */5 cron). So a run polls on its own
@@ -781,7 +825,7 @@ def main():
             print(f"\n  ── poll {polls} "
                   f"({datetime.now().strftime('%H:%M:%S')}) ──")
 
-        new_state = check_once(event_code, region, date_list, state)
+        new_state = check_once(event_code, region, date_list, watches, state)
 
         if new_state is None:
             failures += 1

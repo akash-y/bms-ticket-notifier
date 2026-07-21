@@ -47,6 +47,8 @@ jobs:
           BMS_THEATRE: ${{ vars.BMS_THEATRE }}
           BMS_TIME: ${{ vars.BMS_TIME }}
           BMS_SCREEN: ${{ vars.BMS_SCREEN }}
+          # JSON array of independent watches; overrides the flat vars above.
+          BMS_WATCHES: ${{ vars.BMS_WATCHES }}
           # Poll for ~55 min per run, so coverage does not depend on GitHub
           # starting the next run on time. 0 = single-shot (local use).
           BMS_LOOP_MINUTES: ${{ vars.BMS_LOOP_MINUTES || '55' }}
