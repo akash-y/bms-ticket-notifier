@@ -10,6 +10,7 @@ import os
 import re
 import sys
 import json
+import time
 from html import escape
 from datetime import datetime
 from dataclasses import dataclass, field
@@ -628,38 +629,14 @@ def send_email(subject, changes, shows, movie_info):
 # ──────────────────────────────────────────────────────────────────────
 # MAIN
 # ──────────────────────────────────────────────────────────────────────
-def main():
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{now_str}] BMS Ticket Checker — CI mode")
+def check_once(event_code, region, date_list, old_state):
+    """Run one poll.
 
-    # Parse config
-    parsed = parse_bms_url(CONFIG["url"])
-    event_code = parsed["event_code"]
-    region_slug = parsed["region_slug"]
-    url_date = parsed.get("date_code", "")
-
-    if not event_code or not region_slug:
-        print("  ❌ Invalid BMS_URL. Could not extract event/region.")
-        sys.exit(1)
-
-    region_code, region_slug_r, lat, lon, geohash = resolve_region(
-        region_slug
-    )
-
-    # Determine dates to check. The default view ("") is always fetched first:
-    # querying a dateCode that has not opened yet can come back empty, and that
-    # view is the only reliable source of the date strip we watch for openings.
-    raw_dates = CONFIG["dates"].strip()
-    if raw_dates:
-        date_list = [""] + [d.strip() for d in raw_dates.split(",")
-                            if d.strip()]
-    elif url_date:
-        date_list = [url_date]
-    else:
-        date_list = [""]
-
-    print(f"  Event: {event_code}  Region: {region_code}  "
-          f"Dates: {date_list}")
+    Returns the new state, or None if BMS could not be read this time. A
+    None is transient by itself — the caller decides when repeated failures
+    mean the watcher is actually broken.
+    """
+    region_code, region_slug_r, lat, lon, geohash = region
 
     # Fetch data for each date
     all_shows = []
@@ -681,18 +658,15 @@ def main():
         all_dates.extend(parse_dates(data))
         all_shows.extend(parse_shows(data))
 
-    # Exit non-zero so the run goes red and GitHub emails about it. A watcher
-    # that cannot reach BMS is broken, but silently returns "nothing to
-    # report" — indistinguishable from a healthy run that found no changes.
+    # Transient by design: BMS 403s intermittently, so one bad poll must not
+    # take the run down. Persistent failure is handled by the caller.
     if not ok_fetches:
-        print("  ❌ Every BMS request failed — the watcher is NOT working. "
-              "Check for blocking/rate-limiting or a changed API.")
-        sys.exit(1)
+        print("  ⚠️  Every BMS request failed this poll.")
+        return None
 
     if not all_dates:
-        print("  ❌ Reached BMS but got no date strip — the API shape may "
-              "have changed. Cannot detect a date opening.")
-        sys.exit(1)
+        print("  ⚠️  Reached BMS but got no date strip this poll.")
+        return None
 
     # Zero shows is normal while waiting for a future date to open: we still
     # have the date strip, so the opening is detectable.
@@ -725,7 +699,6 @@ def main():
     # Build state & detect changes
     watched_dates = parse_date_codes(CONFIG["dates"])
     new_state = build_state(filtered, all_dates, watched_dates)
-    old_state = load_state()
 
     changes = []
     if old_state:
@@ -754,7 +727,83 @@ def main():
         fmt = f"|{s.screen_attr}" if s.screen_attr else ""
         print(f"    {s.venue_name} — {s.time}{fmt} [{s.date_code}] — {cats}")
 
-    print("\n  Done.")
+    return new_state
+
+
+# Give up only after this many polls in a row fail. Single failures are
+# routine (BMS 403s intermittently); a sustained run of them is not.
+MAX_CONSECUTIVE_FAILURES = 5
+
+
+def main():
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{now_str}] BMS Ticket Checker — CI mode")
+
+    parsed = parse_bms_url(CONFIG["url"])
+    event_code = parsed["event_code"]
+    region_slug = parsed["region_slug"]
+    url_date = parsed.get("date_code", "")
+
+    if not event_code or not region_slug:
+        print("  ❌ Invalid BMS_URL. Could not extract event/region.")
+        sys.exit(1)
+
+    region = resolve_region(region_slug)
+
+    # Determine dates to check. The default view ("") is always fetched first:
+    # querying a dateCode that has not opened yet can come back empty, and that
+    # view is the only reliable source of the date strip we watch for openings.
+    raw_dates = CONFIG["dates"].strip()
+    if raw_dates:
+        date_list = [""] + [d.strip() for d in raw_dates.split(",")
+                            if d.strip()]
+    elif url_date:
+        date_list = [url_date]
+    else:
+        date_list = [""]
+
+    print(f"  Event: {event_code}  Region: {region[0]}  Dates: {date_list}")
+
+    # GitHub's scheduler will not start runs at the interval it is asked for
+    # (measured: gaps of 1–4h against a */5 cron). So a run polls on its own
+    # clock rather than relying on being started again promptly.
+    loop_minutes = float(os.getenv("BMS_LOOP_MINUTES", "0") or 0)
+    poll_seconds = float(os.getenv("BMS_POLL_SECONDS", "60") or 60)
+    deadline = time.monotonic() + loop_minutes * 60
+
+    state = load_state()
+    polls = 0
+    failures = 0
+
+    while True:
+        polls += 1
+        if loop_minutes:
+            print(f"\n  ── poll {polls} "
+                  f"({datetime.now().strftime('%H:%M:%S')}) ──")
+
+        new_state = check_once(event_code, region, date_list, state)
+
+        if new_state is None:
+            failures += 1
+            if failures >= MAX_CONSECUTIVE_FAILURES:
+                # Exit non-zero so the run goes red and GitHub notifies. A
+                # watcher that cannot reach BMS is broken, but silently
+                # reports "nothing to report" — indistinguishable from a
+                # healthy run that found no changes.
+                print(f"  ❌ {failures} consecutive failed polls — the "
+                      f"watcher is NOT working. Check for blocking or a "
+                      f"changed API.")
+                sys.exit(1)
+        else:
+            failures = 0
+            state = new_state
+
+        remaining = deadline - time.monotonic()
+        if remaining <= poll_seconds:
+            break
+        time.sleep(poll_seconds)
+
+    print(f"\n  Done — {polls} poll(s).")
 
 
 if __name__ == "__main__":

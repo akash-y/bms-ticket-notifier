@@ -2,17 +2,26 @@ name: BMS Ticket Checker
 
 on:
   schedule:
-    # Every 5 minutes (GitHub's minimum). Note that GitHub runs scheduled
-    # workflows on a best-effort basis and skips ticks under load — observed
-    # gaps of 2h+ on this repo at */30 — so treat this as "as often as
-    # GitHub will allow", not a guarantee.
+    # GitHub does NOT honour this interval. Measured on this repo: a */5 cron
+    # produced zero scheduled runs in 28 minutes, and */30 produced gaps of up
+    # to 3h54m. So the cron is only a request to *start* a run; each run then
+    # polls on its own clock (BMS_LOOP_MINUTES) to cover the gap between
+    # starts. Keep it frequent so a new run begins soon after one ends.
     - cron: '*/5 * * * *'
   workflow_dispatch:  # Manual trigger button
+
+# Runs are long-lived pollers, so a new one will usually be queued while
+# another is still going. Queue it rather than cancel: cancelling would kill a
+# live poller and discard state it had not committed yet.
+concurrency:
+  group: bms-checker
+  cancel-in-progress: false
 
 jobs:
   check-tickets:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Must exceed BMS_LOOP_MINUTES, plus setup and the final commit.
+    timeout-minutes: 60
     permissions:
       contents: write
 
@@ -38,6 +47,10 @@ jobs:
           BMS_THEATRE: ${{ vars.BMS_THEATRE }}
           BMS_TIME: ${{ vars.BMS_TIME }}
           BMS_SCREEN: ${{ vars.BMS_SCREEN }}
+          # Poll for ~55 min per run, so coverage does not depend on GitHub
+          # starting the next run on time. 0 = single-shot (local use).
+          BMS_LOOP_MINUTES: ${{ vars.BMS_LOOP_MINUTES || '55' }}
+          BMS_POLL_SECONDS: ${{ vars.BMS_POLL_SECONDS || '60' }}
         run: uv run main.py
 
       - name: Commit updated state
