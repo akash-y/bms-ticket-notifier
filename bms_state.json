@@ -8,7 +8,166 @@
   "dolby-jul28": {
     "shows": {},
     "dates": {
-      "20260728": "AVAILABLE"
+      "20260728": "BOOKABLE"
+    }
+  },
+  "probe": {
+    "shows": {
+      "AMBH|115174|20260721|PLATINUM": {
+        "venue": "AMB Cinemas: Gachibowli",
+        "time": "10:20 PM",
+        "date": "20260721",
+        "cat": "PLATINUM",
+        "price": "350.00",
+        "status": "0"
+      },
+      "AMBH|115174|20260721|GOLD": {
+        "venue": "AMB Cinemas: Gachibowli",
+        "time": "10:20 PM",
+        "date": "20260721",
+        "cat": "GOLD",
+        "price": "295.00",
+        "status": "2"
+      },
+      "AMBH|115174|20260721|LOUNGERS": {
+        "venue": "AMB Cinemas: Gachibowli",
+        "time": "10:20 PM",
+        "date": "20260721",
+        "cat": "LOUNGERS",
+        "price": "295.00",
+        "status": "3"
+      },
+      "AMBH|115462|20260721|PLATINUM": {
+        "venue": "AMB Cinemas: Gachibowli",
+        "time": "10:50 PM",
+        "date": "20260721",
+        "cat": "PLATINUM",
+        "price": "350.00",
+        "status": "0"
+      },
+      "AMBH|115462|20260721|GOLD": {
+        "venue": "AMB Cinemas: Gachibowli",
+        "time": "10:50 PM",
+        "date": "20260721",
+        "cat": "GOLD",
+        "price": "295.00",
+        "status": "2"
+      },
+      "AMBH|115462|20260721|LOUNGERS": {
+        "venue": "AMB Cinemas: Gachibowli",
+        "time": "10:50 PM",
+        "date": "20260721",
+        "cat": "LOUNGERS",
+        "price": "295.00",
+        "status": "2"
+      },
+      "ACAS|34554|20260721|RECLINER": {
+        "venue": "AAA Cinemas: Ameerpet",
+        "time": "10:30 PM",
+        "date": "20260721",
+        "cat": "RECLINER",
+        "price": "350.00",
+        "status": "2"
+      },
+      "ACAS|34554|20260721|GOLD": {
+        "venue": "AAA Cinemas: Ameerpet",
+        "time": "10:30 PM",
+        "date": "20260721",
+        "cat": "GOLD",
+        "price": "295.00",
+        "status": "3"
+      },
+      "ACAS|34554|20260721|LOUNGERS": {
+        "venue": "AAA Cinemas: Ameerpet",
+        "time": "10:30 PM",
+        "date": "20260721",
+        "cat": "LOUNGERS",
+        "price": "295.00",
+        "status": "3"
+      },
+      "AMCA|71480|20260721|RECLINERS": {
+        "venue": "Asian M Cube Mall: Attapur",
+        "time": "10:40 PM",
+        "date": "20260721",
+        "cat": "RECLINERS",
+        "price": "350.00",
+        "status": "1"
+      },
+      "AMCA|71480|20260721|GOLD": {
+        "venue": "Asian M Cube Mall: Attapur",
+        "time": "10:40 PM",
+        "date": "20260721",
+        "cat": "GOLD",
+        "price": "250.00",
+        "status": "3"
+      },
+      "JJPP|30197|20260721|RECLINER": {
+        "venue": "JP Cinemas: Chandanagar",
+        "time": "10:15 PM",
+        "date": "20260721",
+        "cat": "RECLINER",
+        "price": "350.00",
+        "status": "2"
+      },
+      "JJPP|30197|20260721|GOLD": {
+        "venue": "JP Cinemas: Chandanagar",
+        "time": "10:15 PM",
+        "date": "20260721",
+        "cat": "GOLD",
+        "price": "295.00",
+        "status": "3"
+      },
+      "DVRR|3538|20260721|LOWER BALCONY": {
+        "venue": "Devi 70MM 4K Laser & Dolby Atmos: RTC X Roads",
+        "time": "10:00 PM",
+        "date": "20260721",
+        "cat": "LOWER BALCONY",
+        "price": "225.00",
+        "status": "3"
+      },
+      "DVRR|3538|20260721|UPPER BALCONY": {
+        "venue": "Devi 70MM 4K Laser & Dolby Atmos: RTC X Roads",
+        "time": "10:00 PM",
+        "date": "20260721",
+        "cat": "UPPER BALCONY",
+        "price": "225.00",
+        "status": "3"
+      },
+      "DVRR|3538|20260721|FIRST CLASS": {
+        "venue": "Devi 70MM 4K Laser & Dolby Atmos: RTC X Roads",
+        "time": "10:00 PM",
+        "date": "20260721",
+        "cat": "FIRST CLASS",
+        "price": "150.00",
+        "status": "3"
+      },
+      "DVRR|3538|20260721|SECOND CLASS": {
+        "venue": "Devi 70MM 4K Laser & Dolby Atmos: RTC X Roads",
+        "time": "10:00 PM",
+        "date": "20260721",
+        "cat": "SECOND CLASS",
+        "price": "100.00",
+        "status": "3"
+      },
+      "TVHY|47300|20260721|GOLD UPPER": {
+        "venue": "Tivoli Cinemas: Secunderabad",
+        "time": "10:50 PM",
+        "date": "20260721",
+        "cat": "GOLD UPPER",
+        "price": "250.00",
+        "status": "3"
+      },
+      "TVHY|47300|20260721|GOLD LOWER": {
+        "venue": "Tivoli Cinemas: Secunderabad",
+        "time": "10:50 PM",
+        "date": "20260721",
+        "cat": "GOLD LOWER",
+        "price": "250.00",
+        "status": "3"
+      }
+    },
+    "dates": {
+      "20260721": "BOOKABLE"
     }
   }
 }
