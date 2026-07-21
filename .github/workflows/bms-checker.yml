@@ -2,8 +2,11 @@ name: BMS Ticket Checker
 
 on:
   schedule:
-    # Every 30 minutes
-    - cron: '*/30 * * * *'
+    # Every 5 minutes (GitHub's minimum). Note that GitHub runs scheduled
+    # workflows on a best-effort basis and skips ticks under load — observed
+    # gaps of 2h+ on this repo at */30 — so treat this as "as often as
+    # GitHub will allow", not a guarantee.
+    - cron: '*/5 * * * *'
   workflow_dispatch:  # Manual trigger button
 
 jobs:
@@ -42,4 +45,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add bms_state.json
-          git diff --cached --quiet || (git commit -m "chore: update bms_state.json [skip ci]" && git push)
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: update bms_state.json [skip ci]"
+          # Another run may have pushed since checkout. Rebase and retry so a
+          # lost race does not fail the run — red runs are a real signal here.
+          for i in 1 2 3; do
+            git push && exit 0
+            git pull --rebase --autostash origin main || exit 1
+          done
+          git push
