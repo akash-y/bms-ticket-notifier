@@ -32,11 +32,43 @@
         "cat": "GOLD.",
         "price": "295.00",
         "status": "3"
+      },
+      "ALUC|3336|20260729|PLATINUM": {
+        "venue": "ALLU Cinemas: Kokapet",
+        "time": "08:45 AM",
+        "date": "20260729",
+        "cat": "PLATINUM",
+        "price": "350.00",
+        "status": "0"
+      },
+      "ALUC|3336|20260729|DIRECTOR CHOICE": {
+        "venue": "ALLU Cinemas: Kokapet",
+        "time": "08:45 AM",
+        "date": "20260729",
+        "cat": "DIRECTOR CHOICE",
+        "price": "350.00",
+        "status": "0"
+      },
+      "ALUC|3336|20260729|GOLD": {
+        "venue": "ALLU Cinemas: Kokapet",
+        "time": "08:45 AM",
+        "date": "20260729",
+        "cat": "GOLD",
+        "price": "295.00",
+        "status": "3"
+      },
+      "ALUC|3336|20260729|GOLD.": {
+        "venue": "ALLU Cinemas: Kokapet",
+        "time": "08:45 AM",
+        "date": "20260729",
+        "cat": "GOLD.",
+        "price": "295.00",
+        "status": "3"
       }
     },
     "dates": {
       "20260728": "BOOKABLE",
-      "20260729": "NOT_LISTED"
+      "20260729": "BOOKABLE"
     }
   },
   "pcx-prasads-aug1": {
