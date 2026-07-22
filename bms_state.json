@@ -1,5 +1,5 @@
 {
-  "dolby-probe": {
+  "dolby-allu": {
     "shows": {
       "ALUC|3296|20260728|PLATINUM": {
         "venue": "ALLU Cinemas: Kokapet",
@@ -37,6 +37,12 @@
     "dates": {
       "20260728": "BOOKABLE",
       "20260729": "NOT_LISTED"
+    }
+  },
+  "pcx-aug1": {
+    "shows": {},
+    "dates": {
+      "20260801": "NOT_LISTED"
     }
   }
 }
