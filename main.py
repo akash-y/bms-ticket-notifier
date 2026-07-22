@@ -297,25 +297,41 @@ def parse_watches():
     targets ("PCX on Aug 1", "Dolby on Jul 28") stay separate instead of
     being combined into one filter set that would match their cross-product.
     Falls back to the flat BMS_* vars when unset.
+
+    Each watch may carry its own "url" — a premium format like Dolby Cinema
+    2D or IMAX is a SEPARATE BMS event code, not a screen inside the standard
+    listing, so filtering the standard event can never find it. A watch with
+    no url uses the global BMS_URL.
     """
     raw = os.getenv("BMS_WATCHES", "").strip()
     if not raw:
-        return [{
+        entries = [{
             "name": "default",
             "dates": CONFIG["dates"],
             "theatre": CONFIG["theatre"],
             "screen": CONFIG["screen"],
             "time": CONFIG["time_period"],
         }]
+    else:
+        entries = json.loads(raw)
 
     watches = []
-    for i, w in enumerate(json.loads(raw)):
+    for i, w in enumerate(entries):
+        url = str(w.get("url") or CONFIG["url"])
+        parsed = parse_bms_url(url)
+        if not parsed["event_code"] or not parsed["region_slug"]:
+            raise ValueError(
+                f"watch {w.get('name') or i + 1}: cannot extract event/region "
+                f"from url {url!r}")
         watches.append({
             "name": str(w.get("name") or f"watch{i + 1}"),
             "dates": str(w.get("dates", "")),
             "theatre": str(w.get("theatre", "")),
             "screen": str(w.get("screen", "")),
             "time": str(w.get("time", "")),
+            "event_code": parsed["event_code"],
+            "region_slug": parsed["region_slug"],
+            "region": resolve_region(parsed["region_slug"]),
         })
     if not watches:
         raise ValueError("BMS_WATCHES is an empty list")
@@ -681,111 +697,132 @@ def send_email(subject, changes, shows, movie_info):
 # ──────────────────────────────────────────────────────────────────────
 # MAIN
 # ──────────────────────────────────────────────────────────────────────
-def check_once(event_code, region, date_list, watches, old_state):
-    """Run one poll across every watch.
-
-    Returns the new state keyed by watch name, or None if BMS could not be
-    read this time. A None is transient by itself — the caller decides when
-    repeated failures mean the watcher is actually broken.
-    """
+def fetch_event(event_code, region, date_list):
+    """Fetch one event across date_list. Returns (shows, dates, movie, ok)."""
     region_code, region_slug_r, lat, lon, geohash = region
-
-    # Fetch data for each date
-    all_shows = []
-    all_dates = []
+    all_shows, all_dates = [], []
     movie_info = {"name": "Unknown", "language": ""}
-
     ok_fetches = 0
     for dc in date_list:
         data = fetch_bms(event_code, dc, region_code,
                          region_slug_r, lat, lon, geohash)
         if not data:
-            print(f"  ⚠️  No data for date {dc or '(default)'}")
+            print(f"  ⚠️  No data for {event_code} date {dc or '(default)'}")
             continue
         ok_fetches += 1
-
         if movie_info["name"] == "Unknown":
             movie_info = parse_movie_info(data)
-
         all_dates.extend(parse_dates(data))
         all_shows.extend(parse_shows(data))
+    return all_shows, all_dates, movie_info, ok_fetches
 
-    # Transient by design: BMS 403s intermittently, so one bad poll must not
-    # take the run down. Persistent failure is handled by the caller.
-    if not ok_fetches:
-        print("  ⚠️  Every BMS request failed this poll.")
-        return None
 
-    if not all_dates:
-        print("  ⚠️  Reached BMS but got no date strip this poll.")
-        return None
+def check_once(watches, old_state):
+    """Run one poll across every watch.
 
-    # Zero shows is normal while waiting for a future date to open: we still
-    # have the date strip, so the opening is detectable.
-
-    print(f"  🎬 {movie_info['name']}  {movie_info['language']}")
-
-    # Each watch filters the same fetched data independently, so watching
-    # "PCX on Aug 1" and "Dolby on Jul 28" cannot bleed into each other the
-    # way a single combined filter set would.
-    new_state = {}
+    Watches are grouped by event code so each event is fetched once. Returns
+    new state keyed by watch name, or None if EVERY event failed this poll (a
+    transient signal the caller escalates only after repeated failures). If
+    some events succeed and others fail, the failed event's watches keep their
+    previous state so a single flaky 403 does not erase a baseline.
+    """
+    old_state = old_state or {}
+    groups = {}
     for w in watches:
-        filtered = filter_shows(
-            all_shows, w["theatre"], w["time"], w["dates"], w["screen"],
-        )
-        # The default view and a targeted view can return the same showtime.
-        seen = set()
-        deduped = []
-        for s in filtered:
-            key = (s.venue_code, s.session_id, s.date_code, s.time)
-            if key not in seen:
-                seen.add(key)
-                deduped.append(s)
-        filtered = deduped
+        groups.setdefault(w["event_code"], []).append(w)
 
-        print(f"  ── {w['name']}: {len(filtered)} showtime(s) after filters")
+    new_state = {}
+    events_ok = 0
+    for event_code, group in groups.items():
+        region = group[0]["region"]  # same event code → same region
+        wanted = set()
+        for w in group:
+            wanted |= parse_date_codes(w["dates"])
+        date_list = [""] + sorted(wanted) if wanted else [""]
 
-        if all_shows and not filtered:
-            warn_empty_filter(all_shows, w)
+        all_shows, all_dates, movie_info, ok = fetch_event(
+            event_code, region, date_list)
 
-        watched_dates = parse_date_codes(w["dates"])
-        slice_new = build_state(filtered, all_dates, watched_dates)
-        new_state[w["name"]] = slice_new
+        if not ok or not all_dates:
+            # This event was unreadable this poll. Carry its watches' prior
+            # state forward untouched rather than dropping their baselines.
+            print(f"  ⚠️  {event_code}: no data this poll — carrying state.")
+            for w in group:
+                if w["name"] in old_state:
+                    new_state[w["name"]] = old_state[w["name"]]
+            continue
+        events_ok += 1
 
-        slice_old = (old_state or {}).get(w["name"])
-        if slice_old is not None:
-            changes = detect_changes(slice_old, slice_new)
-        else:
-            # First time this watch runs. Do NOT silently adopt the current
-            # state as baseline — if the target is ALREADY live (a watched
-            # date open, or shows already matching), the user set the watch up
-            # late and would otherwise never hear about it. Alert on bootstrap.
-            changes = bootstrap_changes(slice_new)
+        print(f"  🎬 {movie_info['name']}  {movie_info['language']}  "
+              f"[{event_code}]")
 
-        if changes:
-            print(f"\n  ⚡ {w['name']}: {len(changes)} change(s) detected:")
-            for c in changes:
-                print(f"     {c}")
-            send_email(
-                f"BMS Alert: {movie_info['name']} ({w['name']}) — "
-                f"{len(changes)} change(s)",
-                changes, filtered, movie_info,
-            )
-        else:
-            print(f"     ✅ no changes")
+        for w in group:
+            _check_watch(w, all_shows, all_dates, movie_info,
+                         old_state, new_state)
 
-        for s in filtered:
-            cats = ", ".join(
-                f"{c.name}=₹{c.price}"
-                f"({AVAIL_STATUS_MAP.get(c.status, ('?', ''))[0]})"
-                for c in s.categories
-            )
-            fmt = f"|{s.screen_attr}" if s.screen_attr else ""
-            print(f"     {s.venue_name} — {s.time}{fmt} "
-                  f"[{s.date_code}] — {cats}")
+    if not events_ok:
+        print("  ⚠️  Every event failed this poll.")
+        return None
 
     save_state(new_state)
     return new_state
+
+
+def _check_watch(w, all_shows, all_dates, movie_info, old_state, new_state):
+    """Filter one watch against its event's data and alert on changes."""
+    filtered = filter_shows(
+        all_shows, w["theatre"], w["time"], w["dates"], w["screen"],
+    )
+    # The default view and a targeted view can return the same showtime.
+    seen = set()
+    deduped = []
+    for s in filtered:
+        key = (s.venue_code, s.session_id, s.date_code, s.time)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(s)
+    filtered = deduped
+
+    print(f"  ── {w['name']}: {len(filtered)} showtime(s) after filters")
+
+    if all_shows and not filtered:
+        warn_empty_filter(all_shows, w)
+
+    watched_dates = parse_date_codes(w["dates"])
+    slice_new = build_state(filtered, all_dates, watched_dates)
+    new_state[w["name"]] = slice_new
+
+    slice_old = old_state.get(w["name"])
+    if slice_old is not None:
+        changes = detect_changes(slice_old, slice_new)
+    else:
+        # First time this watch runs. Do NOT silently adopt the current state
+        # as baseline — if the target is ALREADY live (a watched date open, or
+        # shows already matching), the user set the watch up late and would
+        # otherwise never hear about it. Alert on bootstrap.
+        changes = bootstrap_changes(slice_new)
+
+    if changes:
+        print(f"\n  ⚡ {w['name']}: {len(changes)} change(s) detected:")
+        for c in changes:
+            print(f"     {c}")
+        send_email(
+            f"BMS Alert: {movie_info['name']} ({w['name']}) — "
+            f"{len(changes)} change(s)",
+            changes, filtered, movie_info,
+        )
+    else:
+        print(f"     ✅ no changes")
+
+    for s in filtered:
+        cats = ", ".join(
+            f"{c.name}=₹{c.price}"
+            f"({AVAIL_STATUS_MAP.get(c.status, ('?', ''))[0]})"
+            for c in s.categories
+        )
+        fmt = f"|{s.screen_attr}" if s.screen_attr else ""
+        print(f"     {s.venue_name} — {s.time}{fmt} "
+              f"[{s.date_code}] — {cats}")
 
 
 # Give up only after this many polls in a row fail. Single failures are
@@ -797,36 +834,15 @@ def main():
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{now_str}] BMS Ticket Checker — CI mode")
 
-    parsed = parse_bms_url(CONFIG["url"])
-    event_code = parsed["event_code"]
-    region_slug = parsed["region_slug"]
-    url_date = parsed.get("date_code", "")
-
-    if not event_code or not region_slug:
-        print("  ❌ Invalid BMS_URL. Could not extract event/region.")
+    try:
+        watches = parse_watches()
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"  ❌ Bad watch config: {e}")
         sys.exit(1)
 
-    region = resolve_region(region_slug)
-
-    watches = parse_watches()
-
-    # Fetch the union of every watch's dates once, then let each watch filter
-    # that shared result. The default view ("") is always included: querying a
-    # dateCode that has not opened yet can come back empty, and that view is
-    # the only reliable source of the date strip we watch for openings.
-    wanted = set()
     for w in watches:
-        wanted |= parse_date_codes(w["dates"])
-    if wanted:
-        date_list = [""] + sorted(wanted)
-    elif url_date:
-        date_list = [url_date]
-    else:
-        date_list = [""]
-
-    print(f"  Event: {event_code}  Region: {region[0]}  Dates: {date_list}")
-    for w in watches:
-        print(f"    watch {w['name']}: dates={w['dates'] or 'any'} "
+        print(f"    watch {w['name']}: event={w['event_code']} "
+              f"dates={w['dates'] or 'any'} "
               f"theatre={w['theatre'] or 'any'} "
               f"screen={w['screen'] or 'any'}")
 
@@ -847,7 +863,7 @@ def main():
             print(f"\n  ── poll {polls} "
                   f"({datetime.now().strftime('%H:%M:%S')}) ──")
 
-        new_state = check_once(event_code, region, date_list, watches, state)
+        new_state = check_once(watches, state)
 
         if new_state is None:
             failures += 1
