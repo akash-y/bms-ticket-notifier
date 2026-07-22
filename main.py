@@ -478,6 +478,21 @@ def build_state(shows, dates, watched_dates=None):
     return {"shows": show_state, "dates": date_state}
 
 
+def bootstrap_changes(new_state):
+    """Changes to report on a watch's very first observation.
+
+    Equivalent to diffing against an all-closed, no-shows prior state: any
+    already-open watched date and any already-present show is surfaced. This
+    stops a watch created after its target went live from silently swallowing
+    it — the failure that let the Jul 28/29 shows slip by unnoticed.
+    """
+    empty = {"dates": {dc: "NOT_LISTED" for dc in new_state.get("dates", {})},
+             "shows": {}}
+    changes = detect_changes(empty, new_state)
+    return [c.replace("NEW DATE OPENED", "ALREADY OPEN")
+             .replace("🆕 NEW:", "🎟️  ALREADY LIVE:") for c in changes]
+
+
 def detect_changes(old_state, new_state):
     changes = []
 
@@ -738,7 +753,14 @@ def check_once(event_code, region, date_list, watches, old_state):
         new_state[w["name"]] = slice_new
 
         slice_old = (old_state or {}).get(w["name"])
-        changes = detect_changes(slice_old, slice_new) if slice_old else []
+        if slice_old is not None:
+            changes = detect_changes(slice_old, slice_new)
+        else:
+            # First time this watch runs. Do NOT silently adopt the current
+            # state as baseline — if the target is ALREADY live (a watched
+            # date open, or shows already matching), the user set the watch up
+            # late and would otherwise never hear about it. Alert on bootstrap.
+            changes = bootstrap_changes(slice_new)
 
         if changes:
             print(f"\n  ⚡ {w['name']}: {len(changes)} change(s) detected:")
