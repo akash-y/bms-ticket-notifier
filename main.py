@@ -502,9 +502,16 @@ def bootstrap_changes(new_state):
     stops a watch created after its target went live from silently swallowing
     it — the failure that let the Jul 28/29 shows slip by unnoticed.
     """
-    empty = {"dates": {dc: "NOT_LISTED" for dc in new_state.get("dates", {})},
-             "shows": {}}
-    changes = detect_changes(empty, new_state)
+    # Seed the prior state with the currently sold-out categories so they are
+    # NOT announced as "live" on bootstrap — only genuinely bookable shows are
+    # surfaced. A sold-out seat freeing up later is then caught as a normal
+    # change (status "0" → available) against the committed baseline.
+    prior = {
+        "dates": {dc: "NOT_LISTED" for dc in new_state.get("dates", {})},
+        "shows": {k: v for k, v in new_state.get("shows", {}).items()
+                  if v.get("status") == "0"},
+    }
+    changes = detect_changes(prior, new_state)
     return [c.replace("NEW DATE OPENED", "ALREADY OPEN")
              .replace("🆕 NEW:", "🎟️  ALREADY LIVE:") for c in changes]
 
