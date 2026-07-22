@@ -1,20 +1,20 @@
 {
-  "p-allu": {
+  "pcx-jul29": {
     "shows": {},
     "dates": {
-      "20260729": "BOOKABLE"
+      "20260729": "AVAILABLE"
     }
   },
-  "p-prasads": {
+  "pcx-aug1": {
     "shows": {},
     "dates": {
-      "20260729": "BOOKABLE"
+      "20260801": "NOT_LISTED"
     }
   },
-  "p-dolby-any": {
+  "dolby-jul29": {
     "shows": {},
     "dates": {
-      "20260729": "BOOKABLE"
+      "20260729": "AVAILABLE"
     }
   }
 }
