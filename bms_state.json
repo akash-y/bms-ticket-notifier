@@ -1,5 +1,5 @@
 {
-  "see29": {
+  "pcx-jul29": {
     "shows": {
       "PRHN|251862|20260729|GOLD": {
         "venue": "Prasads Multiplex: Hyderabad",
@@ -44,6 +44,12 @@
     },
     "dates": {
       "20260729": "BOOKABLE"
+    }
+  },
+  "pcx-aug1": {
+    "shows": {},
+    "dates": {
+      "20260801": "NOT_LISTED"
     }
   }
 }
