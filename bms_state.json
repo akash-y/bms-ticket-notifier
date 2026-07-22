@@ -1,20 +1,49 @@
 {
-  "pcx-jul29": {
-    "shows": {},
+  "see29": {
+    "shows": {
+      "PRHN|251862|20260729|GOLD": {
+        "venue": "Prasads Multiplex: Hyderabad",
+        "time": "08:45 AM",
+        "date": "20260729",
+        "cat": "GOLD",
+        "price": "295.00",
+        "status": "2"
+      },
+      "PRHN|251863|20260729|GOLD": {
+        "venue": "Prasads Multiplex: Hyderabad",
+        "time": "12:15 PM",
+        "date": "20260729",
+        "cat": "GOLD",
+        "price": "295.00",
+        "status": "2"
+      },
+      "PRHN|251864|20260729|GOLD": {
+        "venue": "Prasads Multiplex: Hyderabad",
+        "time": "03:45 PM",
+        "date": "20260729",
+        "cat": "GOLD",
+        "price": "295.00",
+        "status": "2"
+      },
+      "PRHN|251865|20260729|GOLD": {
+        "venue": "Prasads Multiplex: Hyderabad",
+        "time": "07:15 PM",
+        "date": "20260729",
+        "cat": "GOLD",
+        "price": "295.00",
+        "status": "2"
+      },
+      "PRHN|251866|20260729|GOLD": {
+        "venue": "Prasads Multiplex: Hyderabad",
+        "time": "10:45 PM",
+        "date": "20260729",
+        "cat": "GOLD",
+        "price": "295.00",
+        "status": "2"
+      }
+    },
     "dates": {
-      "20260729": "AVAILABLE"
-    }
-  },
-  "pcx-aug1": {
-    "shows": {},
-    "dates": {
-      "20260801": "NOT_LISTED"
-    }
-  },
-  "dolby-jul29": {
-    "shows": {},
-    "dates": {
-      "20260729": "AVAILABLE"
+      "20260729": "BOOKABLE"
     }
   }
 }
