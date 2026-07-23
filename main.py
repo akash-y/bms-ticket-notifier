@@ -495,68 +495,116 @@ def build_state(shows, dates, watched_dates=None):
     return {"shows": show_state, "dates": date_state}
 
 
-def bootstrap_changes(new_state):
-    """Changes to report on a watch's very first observation.
+def _group_showtimes(show_state):
+    """Collapse the per-category state into one entry per showtime.
 
-    Equivalent to diffing against an all-closed, no-shows prior state: any
-    already-open watched date and any already-present show is surfaced. This
-    stops a watch created after its target went live from silently swallowing
-    it — the failure that let the Jul 28/29 shows slip by unnoticed.
+    State is keyed 'venue|session|date|category'; the showtime is the key
+    without the category, so a single show with four price categories is one
+    showtime, not four separate changes.
     """
-    # Seed the prior state with the currently sold-out categories so they are
-    # NOT announced as "live" on bootstrap — only genuinely bookable shows are
-    # surfaced. A sold-out seat freeing up later is then caught as a normal
-    # change (status "0" → available) against the committed baseline.
-    prior = {
-        "dates": {dc: "NOT_LISTED" for dc in new_state.get("dates", {})},
-        "shows": {k: v for k, v in new_state.get("shows", {}).items()
-                  if v.get("status") == "0"},
-    }
-    changes = detect_changes(prior, new_state)
-    return [c.replace("NEW DATE OPENED", "ALREADY OPEN")
-             .replace("🆕 NEW:", "🎟️  ALREADY LIVE:") for c in changes]
+    out = {}
+    for key, v in show_state.items():
+        sid = key.rsplit("|", 1)[0]
+        st = out.setdefault(sid, {"venue": v["venue"], "time": v["time"],
+                                  "date": v["date"], "cats": []})
+        st["cats"].append({"name": v["cat"], "price": v["price"],
+                           "status": v["status"]})
+    return out
 
 
 def detect_changes(old_state, new_state):
+    """Return structured changes (dicts), one per showtime/date/seat — NOT one
+    per category. Kinds: 'date_open', 'new_show', 'back'. Formatting for the
+    console and the email is done separately so each stays concise."""
     changes = []
 
-    # New dates opening. A date can go from absent-from-the-strip straight to
-    # bookable, so anything that wasn't already open counts as opening.
     old_dates = old_state.get("dates", {})
     new_dates = new_state.get("dates", {})
     CLOSED = (None, "NOT_OPEN", "NOT_LISTED", "UNKNOWN")
     for dc, status in new_dates.items():
         if (old_dates.get(dc) in CLOSED
                 and status in ("BOOKABLE", "AVAILABLE")):
-            changes.append(f"📅 NEW DATE OPENED: {dc}")
+            changes.append({"kind": "date_open", "date": dc})
 
     old_shows = old_state.get("shows", {})
     new_shows = new_state.get("shows", {})
+    old_sids = {k.rsplit("|", 1)[0] for k in old_shows}
 
-    # New showtimes. Include availability so a newly-seen but SOLD OUT category
-    # is not mistaken for something bookable — the exact confusion the Dolby
-    # premium categories cause when a second show appears already sold out.
-    for key in set(new_shows) - set(old_shows):
-        s = new_shows[key]
-        lbl = AVAIL_STATUS_MAP.get(s["status"], ("UNKNOWN", ""))[0]
-        changes.append(
-            f"🆕 NEW: {s['venue']} {s['time']} [{s['date']}] "
-            f"— {s['cat']} ₹{s['price']} ({lbl})"
-        )
+    # One 'new_show' per newly-seen showtime, carrying all its categories.
+    for sid, st in _group_showtimes(new_shows).items():
+        if sid not in old_sids:
+            changes.append({"kind": "new_show", **st})
 
-    # Sold out → available
+    # A seat freeing up on a show we already knew — the actionable signal.
     for key, new_s in new_shows.items():
         old_s = old_shows.get(key)
         if old_s and old_s["status"] == "0" and new_s["status"] != "0":
-            lbl, ico = AVAIL_STATUS_MAP.get(
-                new_s["status"], ("UNKNOWN", "⚪")
-            )
-            changes.append(
-                f"{ico} BACK: {new_s['venue']} {new_s['time']} "
-                f"[{new_s['date']}] — {new_s['cat']} → {lbl}"
-            )
+            changes.append({
+                "kind": "back", "venue": new_s["venue"], "time": new_s["time"],
+                "date": new_s["date"], "cat": new_s["cat"],
+                "price": new_s["price"], "status": new_s["status"],
+            })
 
     return changes
+
+
+def bootstrap_changes(new_state):
+    """Concise current-state summary for a watch's first run.
+
+    Reports only what is actionable right now — watched dates that are already
+    open, and showtimes that have at least one bookable category. Sold-out
+    shows are not announced (a later free-up is caught by detect_changes), so
+    setting up a watch on an already-live target notifies without flooding.
+    """
+    changes = []
+    for dc, status in new_state.get("dates", {}).items():
+        if status in ("BOOKABLE", "AVAILABLE"):
+            changes.append({"kind": "date_open", "date": dc, "bootstrap": True})
+    for sid, st in _group_showtimes(new_state.get("shows", {})).items():
+        if any(c["status"] != "0" for c in st["cats"]):
+            changes.append({"kind": "new_show", "bootstrap": True, **st})
+    return changes
+
+
+def change_line(ch):
+    """One-line console/plain-text rendering of a structured change."""
+    if ch["kind"] == "date_open":
+        verb = "already open" if ch.get("bootstrap") else "OPENED"
+        return f"📅 DATE {verb}: {fmt_date(ch['date'])}"
+    if ch["kind"] == "back":
+        lbl = AVAIL_STATUS_MAP.get(ch["status"], ("?", ""))[0]
+        return (f"🟢 SEAT BACK: {ch['cat']} — {ch['time']}, "
+                f"{fmt_date(ch['date'])} ({lbl})")
+    # new_show
+    avail = [c for c in ch["cats"] if c["status"] != "0"]
+    sold = len(ch["cats"]) - len(avail)
+    verb = "live" if ch.get("bootstrap") else "NEW show"
+    parts = ", ".join(f"{c['name']} {AVAIL_STATUS_MAP.get(c['status'],('?',''))[0]}"
+                      for c in sorted(avail, key=lambda c: c["status"], reverse=True))
+    tail = parts or "no seats yet"
+    if sold and parts:
+        tail += f" (+{sold} sold out)"
+    return f"🎬 {verb}: {ch['time']}, {fmt_date(ch['date'])} — {tail}"
+
+
+def change_subject(changes):
+    """One-line email subject that leads with the most useful change."""
+    backs = [c for c in changes if c["kind"] == "back"]
+    if backs:
+        b = backs[0]
+        extra = f" +{len(backs) - 1} more" if len(backs) > 1 else ""
+        return f"🟢 {b['cat']} back — {b['time']} {fmt_date(b['date'])}{extra}"
+    dates = [c for c in changes if c["kind"] == "date_open"
+             and not c.get("bootstrap")]
+    if dates:
+        return f"📅 {fmt_date(dates[0]['date'])} opened for booking"
+    live = [c for c in changes if c["kind"] == "new_show"
+            and any(x["status"] != "0" for x in c["cats"])]
+    if live:
+        s = live[0]
+        return f"🎬 New show {s['time']}, {fmt_date(s['date'])}"
+    n = len(changes)
+    return f"{n} update{'s' if n != 1 else ''}"
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -581,11 +629,6 @@ def fmt_date(date_code):
         return datetime.strptime(date_code, "%Y%m%d").strftime("%a %d %b")
     except (ValueError, TypeError):
         return date_code
-
-
-def prettify_change(text):
-    """Replace raw YYYYMMDD codes in a change line with readable dates."""
-    return re.sub(r"\b(20\d{6})\b", lambda m: fmt_date(m.group(1)), text)
 
 
 def booking_url(watch, date_code):
@@ -614,21 +657,60 @@ def send_email(subject, changes, shows, movie_info, watch):
     movie_name = movie_info.get("name", "Movie")
     watch_label = watch.get("name", "")
 
-    # ── WHAT CHANGED — the whole point of the email, so it leads. ──────────
+    # ── WHAT CHANGED — the whole point of the email, so it leads. Rendered
+    # one line per showtime/date/seat (not per category), actionable first,
+    # with sold-out-only new shows collapsed to a single muted line. ───────
+    bootstrap = any(c.get("bootstrap") for c in changes)
+    banner_title = ("📸 Current status (new watch)" if bootstrap
+                    else "⚡ What changed since the last alert")
+
+    def _row(inner):
+        return (f'<tr><td style="padding:7px 12px;font-size:14px;'
+                f'border-top:1px solid #fde68a;">{inner}</td></tr>')
+
     if changes:
-        change_rows = "".join(
-            f'<tr><td style="padding:6px 10px;font-size:14px;color:#111827;'
-            f'border-bottom:1px solid #fde68a;">{escape(prettify_change(c))}'
-            f'</td></tr>'
-            for c in changes
-        )
+        ordered = ([c for c in changes if c["kind"] == "back"]
+                   + [c for c in changes if c["kind"] == "date_open"]
+                   + [c for c in changes if c["kind"] == "new_show"])
+        rows, soldout_new = [], 0
+        for ch in ordered:
+            if ch["kind"] == "date_open":
+                verb = "is open" if ch.get("bootstrap") else "opened for booking"
+                rows.append(_row(
+                    f'📅 <b style="color:#166534;">{escape(fmt_date(ch["date"]))}'
+                    f'</b> {verb}'))
+            elif ch["kind"] == "back":
+                rows.append(_row(
+                    f'🟢 <b style="color:#166534;">{escape(ch["cat"])}</b> is '
+                    f'back — {escape(ch["time"])}, {escape(fmt_date(ch["date"]))}'))
+            else:  # new_show
+                avail = sorted((c for c in ch["cats"] if c["status"] != "0"),
+                               key=lambda c: c["status"], reverse=True)
+                if not avail:
+                    soldout_new += 1
+                    continue
+                sold = len(ch["cats"]) - len(avail)
+                seats = " · ".join(
+                    f'{STATUS_STYLE.get(c["status"], ("", "⚪"))[1]} '
+                    f'{escape(c["name"])}' for c in avail)
+                extra = (f' <span style="color:#9ca3af;">(+{sold} sold out)'
+                         f'</span>') if sold else ""
+                verb = "Live now" if ch.get("bootstrap") else "New show"
+                rows.append(_row(
+                    f'🎬 {verb} <b>{escape(ch["time"])}, '
+                    f'{escape(fmt_date(ch["date"]))}</b> — {seats}{extra}'))
+        if soldout_new:
+            rows.append(_row(
+                f'<span style="color:#9ca3af;">＋ {soldout_new} more showtime'
+                f'{"s" if soldout_new != 1 else ""} — no seats yet</span>'))
+        change_rows = "".join(rows)
         changes_html = f"""
     <table role="presentation" width="100%" style="border-collapse:collapse;
            background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;
-           margin:0 0 22px 0;">
-        <tr><td style="padding:10px 10px 4px 10px;font-size:12px;
+           margin:0 0 22px 0;overflow:hidden;">
+        <tr><td style="padding:10px 12px 3px 12px;font-size:12px;
                font-weight:700;letter-spacing:.04em;color:#b45309;
-               text-transform:uppercase;">⚡ What changed since the last alert</td></tr>
+               text-transform:uppercase;">{banner_title}</td></tr>
         {change_rows}
     </table>"""
     else:
@@ -725,8 +807,9 @@ def send_email(subject, changes, shows, movie_info, watch):
     # ── Plain-text fallback (same information, links inline). ──────────────
     plain_lines = [f"{movie_name} — watch: {watch_label}", now_str, ""]
     if changes:
-        plain_lines.append("WHAT CHANGED SINCE LAST ALERT:")
-        plain_lines.extend(f"  - {prettify_change(c)}" for c in changes)
+        plain_lines.append("CURRENT STATUS (new watch):" if bootstrap
+                           else "WHAT CHANGED SINCE LAST ALERT:")
+        plain_lines.extend(f"  - {change_line(c)}" for c in changes)
         plain_lines.append("")
     plain_lines.append("CURRENT SHOWTIMES:")
     for dc in sorted(by_date):
@@ -879,10 +962,10 @@ def _check_watch(w, all_shows, all_dates, movie_info, old_state, new_state):
     if changes:
         print(f"\n  ⚡ {w['name']}: {len(changes)} change(s) detected:")
         for c in changes:
-            print(f"     {c}")
+            print(f"     {change_line(c)}")
+        # Subject leads with the single most useful thing, not a raw count.
         send_email(
-            f"BMS Alert: {movie_info['name']} ({w['name']}) — "
-            f"{len(changes)} change(s)",
+            f"BMS Alert: {movie_info['name']} — {change_subject(changes)}",
             changes, filtered, movie_info, w,
         )
     else:
