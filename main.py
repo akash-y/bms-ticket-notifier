@@ -532,12 +532,15 @@ def detect_changes(old_state, new_state):
     old_shows = old_state.get("shows", {})
     new_shows = new_state.get("shows", {})
 
-    # New showtimes
+    # New showtimes. Include availability so a newly-seen but SOLD OUT category
+    # is not mistaken for something bookable — the exact confusion the Dolby
+    # premium categories cause when a second show appears already sold out.
     for key in set(new_shows) - set(old_shows):
         s = new_shows[key]
+        lbl = AVAIL_STATUS_MAP.get(s["status"], ("UNKNOWN", ""))[0]
         changes.append(
             f"🆕 NEW: {s['venue']} {s['time']} [{s['date']}] "
-            f"— {s['cat']} ₹{s['price']}"
+            f"— {s['cat']} ₹{s['price']} ({lbl})"
         )
 
     # Sold out → available
