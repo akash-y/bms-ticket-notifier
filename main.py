@@ -855,23 +855,32 @@ def send_email(subject, changes, shows, movie_info, watch):
 # MAIN
 # ──────────────────────────────────────────────────────────────────────
 def fetch_event(event_code, region, date_list):
-    """Fetch one event across date_list. Returns (shows, dates, movie, ok)."""
+    """Fetch one event across date_list.
+
+    Returns (shows, dates, movie, ok_fetches, failed_dates) where failed_dates
+    is the set of specific date codes whose fetch failed this poll — the caller
+    carries those dates' shows forward so a transient 403 doesn't drop them and
+    re-report them as new next poll.
+    """
     region_code, region_slug_r, lat, lon, geohash = region
     all_shows, all_dates = [], []
     movie_info = {"name": "Unknown", "language": ""}
     ok_fetches = 0
+    failed_dates = set()
     for dc in date_list:
         data = fetch_bms(event_code, dc, region_code,
                          region_slug_r, lat, lon, geohash)
         if not data:
             print(f"  ⚠️  No data for {event_code} date {dc or '(default)'}")
+            if dc:
+                failed_dates.add(dc)
             continue
         ok_fetches += 1
         if movie_info["name"] == "Unknown":
             movie_info = parse_movie_info(data)
         all_dates.extend(parse_dates(data))
         all_shows.extend(parse_shows(data))
-    return all_shows, all_dates, movie_info, ok_fetches
+    return all_shows, all_dates, movie_info, ok_fetches, failed_dates
 
 
 def check_once(watches, old_state):
@@ -897,7 +906,7 @@ def check_once(watches, old_state):
             wanted |= parse_date_codes(w["dates"])
         date_list = [""] + sorted(wanted) if wanted else [""]
 
-        all_shows, all_dates, movie_info, ok = fetch_event(
+        all_shows, all_dates, movie_info, ok, failed_dates = fetch_event(
             event_code, region, date_list)
 
         if not ok or not all_dates:
@@ -915,7 +924,7 @@ def check_once(watches, old_state):
 
         for w in group:
             _check_watch(w, all_shows, all_dates, movie_info,
-                         old_state, new_state)
+                         old_state, new_state, failed_dates)
 
     if not events_ok:
         print("  ⚠️  Every event failed this poll.")
@@ -925,7 +934,8 @@ def check_once(watches, old_state):
     return new_state
 
 
-def _check_watch(w, all_shows, all_dates, movie_info, old_state, new_state):
+def _check_watch(w, all_shows, all_dates, movie_info, old_state, new_state,
+                 failed_dates=frozenset()):
     """Filter one watch against its event's data and alert on changes."""
     filtered = filter_shows(
         all_shows, w["theatre"], w["time"], w["dates"], w["screen"],
@@ -947,9 +957,23 @@ def _check_watch(w, all_shows, all_dates, movie_info, old_state, new_state):
 
     watched_dates = parse_date_codes(w["dates"])
     slice_new = build_state(filtered, all_dates, watched_dates)
-    new_state[w["name"]] = slice_new
 
     slice_old = old_state.get(w["name"])
+
+    # Carry forward shows/date-status for any watched date whose fetch FAILED
+    # this poll. Without this, BMS's intermittent 403s drop that date's shows,
+    # which then re-register as "new" on the next successful poll — the cause
+    # of duplicate alerts firing over and over for the same shows.
+    if slice_old and failed_dates:
+        for key, val in slice_old.get("shows", {}).items():
+            if val.get("date") in failed_dates and key not in slice_new["shows"]:
+                slice_new["shows"][key] = val
+        for dc, st in slice_old.get("dates", {}).items():
+            if dc in failed_dates and DATE_OPENNESS.get(st, 0) > \
+                    DATE_OPENNESS.get(slice_new["dates"].get(dc), 0):
+                slice_new["dates"][dc] = st
+
+    new_state[w["name"]] = slice_new
     if slice_old is not None:
         changes = detect_changes(slice_old, slice_new)
     else:
