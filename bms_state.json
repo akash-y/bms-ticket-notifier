@@ -1,6 +1,70 @@
 {
   "dolby-allu": {
     "shows": {
+      "ALUC|3336|20260729|PLATINUM": {
+        "venue": "ALLU Cinemas: Kokapet",
+        "time": "08:45 AM",
+        "date": "20260729",
+        "cat": "PLATINUM",
+        "price": "350.00",
+        "status": "0"
+      },
+      "ALUC|3336|20260729|DIRECTOR CHOICE": {
+        "venue": "ALLU Cinemas: Kokapet",
+        "time": "08:45 AM",
+        "date": "20260729",
+        "cat": "DIRECTOR CHOICE",
+        "price": "350.00",
+        "status": "0"
+      },
+      "ALUC|3336|20260729|GOLD": {
+        "venue": "ALLU Cinemas: Kokapet",
+        "time": "08:45 AM",
+        "date": "20260729",
+        "cat": "GOLD",
+        "price": "295.00",
+        "status": "2"
+      },
+      "ALUC|3336|20260729|GOLD.": {
+        "venue": "ALLU Cinemas: Kokapet",
+        "time": "08:45 AM",
+        "date": "20260729",
+        "cat": "GOLD.",
+        "price": "295.00",
+        "status": "3"
+      },
+      "ALUC|3346|20260729|PLATINUM": {
+        "venue": "ALLU Cinemas: Kokapet",
+        "time": "12:25 PM",
+        "date": "20260729",
+        "cat": "PLATINUM",
+        "price": "350.00",
+        "status": "0"
+      },
+      "ALUC|3346|20260729|DIRECTOR CHOICE": {
+        "venue": "ALLU Cinemas: Kokapet",
+        "time": "12:25 PM",
+        "date": "20260729",
+        "cat": "DIRECTOR CHOICE",
+        "price": "350.00",
+        "status": "0"
+      },
+      "ALUC|3346|20260729|GOLD": {
+        "venue": "ALLU Cinemas: Kokapet",
+        "time": "12:25 PM",
+        "date": "20260729",
+        "cat": "GOLD",
+        "price": "295.00",
+        "status": "2"
+      },
+      "ALUC|3346|20260729|GOLD.": {
+        "venue": "ALLU Cinemas: Kokapet",
+        "time": "12:25 PM",
+        "date": "20260729",
+        "cat": "GOLD.",
+        "price": "295.00",
+        "status": "3"
+      },
       "ALUC|3296|20260728|PLATINUM": {
         "venue": "ALLU Cinemas: Kokapet",
         "time": "08:45 AM",
@@ -119,7 +183,7 @@
         "date": "20260728",
         "cat": "GOLD",
         "price": "295.00",
-        "status": "2"
+        "status": "1"
       },
       "ALUC|3344|20260728|GOLD.": {
         "venue": "ALLU Cinemas: Kokapet",
@@ -160,78 +224,14 @@
         "cat": "GOLD.",
         "price": "295.00",
         "status": "3"
-      },
-      "ALUC|3336|20260729|PLATINUM": {
-        "venue": "ALLU Cinemas: Kokapet",
-        "time": "08:45 AM",
-        "date": "20260729",
-        "cat": "PLATINUM",
-        "price": "350.00",
-        "status": "0"
-      },
-      "ALUC|3336|20260729|DIRECTOR CHOICE": {
-        "venue": "ALLU Cinemas: Kokapet",
-        "time": "08:45 AM",
-        "date": "20260729",
-        "cat": "DIRECTOR CHOICE",
-        "price": "350.00",
-        "status": "0"
-      },
-      "ALUC|3336|20260729|GOLD": {
-        "venue": "ALLU Cinemas: Kokapet",
-        "time": "08:45 AM",
-        "date": "20260729",
-        "cat": "GOLD",
-        "price": "295.00",
-        "status": "2"
-      },
-      "ALUC|3336|20260729|GOLD.": {
-        "venue": "ALLU Cinemas: Kokapet",
-        "time": "08:45 AM",
-        "date": "20260729",
-        "cat": "GOLD.",
-        "price": "295.00",
-        "status": "3"
-      },
-      "ALUC|3346|20260729|PLATINUM": {
-        "venue": "ALLU Cinemas: Kokapet",
-        "time": "12:25 PM",
-        "date": "20260729",
-        "cat": "PLATINUM",
-        "price": "350.00",
-        "status": "0"
-      },
-      "ALUC|3346|20260729|DIRECTOR CHOICE": {
-        "venue": "ALLU Cinemas: Kokapet",
-        "time": "12:25 PM",
-        "date": "20260729",
-        "cat": "DIRECTOR CHOICE",
-        "price": "350.00",
-        "status": "0"
-      },
-      "ALUC|3346|20260729|GOLD": {
-        "venue": "ALLU Cinemas: Kokapet",
-        "time": "12:25 PM",
-        "date": "20260729",
-        "cat": "GOLD",
-        "price": "295.00",
-        "status": "2"
-      },
-      "ALUC|3346|20260729|GOLD.": {
-        "venue": "ALLU Cinemas: Kokapet",
-        "time": "12:25 PM",
-        "date": "20260729",
-        "cat": "GOLD.",
-        "price": "295.00",
-        "status": "3"
       }
     },
     "dates": {
       "20260728": "BOOKABLE",
       "20260729": "BOOKABLE",
+      "20260731": "NOT_LISTED",
       "20260801": "NOT_LISTED",
-      "20260730": "NOT_LISTED",
-      "20260731": "NOT_LISTED"
+      "20260730": "NOT_LISTED"
     }
   },
   "pcx-prasads-aug1": {
