@@ -329,6 +329,7 @@ def parse_watches():
             "theatre": str(w.get("theatre", "")),
             "screen": str(w.get("screen", "")),
             "time": str(w.get("time", "")),
+            "url": url,
             "event_code": parsed["event_code"],
             "region_slug": parsed["region_slug"],
             "region": resolve_region(parsed["region_slug"]),
@@ -638,6 +639,9 @@ def send_email(subject, changes, shows, movie_info, watch):
     for s in shows:
         by_date.setdefault(s.date_code, []).append(s)
 
+    # Available first so the bookable options lead; sold-out sinks to the end.
+    avail_rank = {"3": 0, "2": 1, "1": 2, "0": 3}
+
     def badge(cat):
         lbl, emoji, fg, bg = STATUS_STYLE.get(cat.status,
                                               ("UNKNOWN", "⚪", "#374151", "#f3f4f6"))
@@ -655,12 +659,21 @@ def send_email(subject, changes, shows, movie_info, watch):
         for s in by_date[dc]:
             fmt = f' <span style="color:#6b7280;">[{escape(s.screen_attr)}]</span>' \
                   if s.screen_attr else ""
-            badges = "".join(badge(c) for c in s.categories)
+            cats = sorted(s.categories, key=lambda c: avail_rank.get(c.status, 9))
+            badges = "".join(badge(c) for c in cats)
+            # Green accent + flag when something is bookable; muted when not.
+            bookable = any(c.status != "0" for c in s.categories)
+            accent = "#16a34a" if bookable else "#e5e7eb"
+            flag = ('<span style="color:#166534;font-size:11px;font-weight:700;">'
+                    '● seats open</span>') if bookable else (
+                    '<span style="color:#9ca3af;font-size:11px;font-weight:600;">'
+                    '● sold out</span>')
             rows += (
                 f'<tr>'
-                f'<td style="padding:8px 10px;border-top:1px solid #eee;'
-                f'font-size:14px;font-weight:600;white-space:nowrap;'
-                f'vertical-align:top;color:#111827;">{escape(s.time)}{fmt}</td>'
+                f'<td style="padding:8px 10px 8px 12px;border-top:1px solid #eee;'
+                f'border-left:3px solid {accent};font-size:14px;font-weight:600;'
+                f'white-space:nowrap;vertical-align:top;color:#111827;">'
+                f'{escape(s.time)}{fmt}<br>{flag}</td>'
                 f'<td style="padding:6px 10px;border-top:1px solid #eee;">{badges}</td>'
                 f'</tr>'
             )
