@@ -26,18 +26,43 @@ jobs:
       contents: write
 
     steps:
+      - name: Yield if an earlier run is still active
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Belt-and-suspenders over `concurrency`, which has let a scheduled
+          # run start while a dispatched one was still polling — two pollers at
+          # once means duplicate emails. Run IDs increase monotonically, so any
+          # in-progress run with a lower ID than mine started earlier; yield to
+          # it and exit cleanly so only the earliest poller runs.
+          me=${{ github.run_id }}
+          older=$(gh run list --repo "$GITHUB_REPOSITORY" \
+                    --workflow=bms-checker.yml --status in_progress \
+                    --json databaseId --jq "[.[] | select(.databaseId < $me)] | length" \
+                    || echo 0)
+          if [ "${older:-0}" -gt 0 ]; then
+            echo "An earlier run is still active — yielding to it."
+            echo "SKIP=1" >> "$GITHUB_ENV"
+          else
+            echo "No earlier active run — proceeding as the poller."
+          fi
+
       - name: Checkout
+        if: env.SKIP != '1'
         uses: actions/checkout@v6
 
       - name: Set up uv
+        if: env.SKIP != '1'
         uses: astral-sh/setup-uv@v7
         with:
           python-version: '3.14'
 
       - name: Install dependencies
+        if: env.SKIP != '1'
         run: uv sync --frozen
 
       - name: Run checker
+        if: env.SKIP != '1'
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           RESEND_TO_EMAIL: ${{ secrets.RESEND_TO_EMAIL }}
@@ -56,16 +81,25 @@ jobs:
         run: uv run main.py
 
       - name: Commit updated state
+        if: env.SKIP != '1'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add bms_state.json
-          git diff --cached --quiet && exit 0
-          git commit -m "chore: update bms_state.json [skip ci]"
-          # Another run may have pushed since checkout. Rebase and retry so a
-          # lost race does not fail the run — red runs are a real signal here.
-          for i in 1 2 3; do
-            git push && exit 0
-            git pull --rebase --autostash origin main || exit 1
+          # bms_state.json is a generated snapshot — never merge it line-by-line
+          # (that conflicts when two runs push different states). Instead, on a
+          # rejected push, reset to the remote tip, re-apply THIS run's state on
+          # top, and retry. Last writer wins, which is correct for a snapshot.
+          cp bms_state.json /tmp/newstate.json
+          for i in $(seq 1 6); do
+            git fetch -q origin main
+            git reset -q --hard origin/main
+            cp /tmp/newstate.json bms_state.json
+            git add bms_state.json
+            git diff --cached --quiet && { echo "state already current"; exit 0; }
+            git commit -q -m "chore: update bms_state.json [skip ci]"
+            git push -q && { echo "state pushed"; exit 0; }
+            echo "push rejected (attempt $i) — remote moved, retrying"
+            sleep $((RANDOM % 5 + 1))
           done
-          git push
+          echo "::error::could not push state after 6 attempts"
+          exit 1
