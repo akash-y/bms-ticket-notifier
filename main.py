@@ -565,7 +565,35 @@ def _cat_status_label(status):
     return AVAIL_STATUS_MAP.get(status, ("UNKNOWN", ""))[0]
 
 
-def send_email(subject, changes, shows, movie_info):
+# status -> (label, emoji, text colour, background) for the availability badges.
+STATUS_STYLE = {
+    "0": ("SOLD OUT",     "🔴", "#6b7280", "#f3f4f6"),
+    "1": ("ALMOST FULL",  "🟡", "#92400e", "#fef3c7"),
+    "2": ("FILLING FAST", "🟠", "#9a3412", "#ffedd5"),
+    "3": ("AVAILABLE",    "🟢", "#166534", "#dcfce7"),
+}
+
+
+def fmt_date(date_code):
+    """20260729 -> 'Wed 29 Jul'. Falls back to the raw code if unparseable."""
+    try:
+        return datetime.strptime(date_code, "%Y%m%d").strftime("%a %d %b")
+    except (ValueError, TypeError):
+        return date_code
+
+
+def prettify_change(text):
+    """Replace raw YYYYMMDD codes in a change line with readable dates."""
+    return re.sub(r"\b(20\d{6})\b", lambda m: fmt_date(m.group(1)), text)
+
+
+def booking_url(watch, date_code):
+    """Direct BMS booking link for one date of a watch's event."""
+    base = watch["url"].split("/buytickets/")[0]
+    return f"{base}/buytickets/{watch['event_code']}/{date_code}"
+
+
+def send_email(subject, changes, shows, movie_info, watch):
     api_key = RESEND_API_KEY.strip()
     to = RESEND_TO_EMAIL.strip()
     frm = RESEND_FROM_EMAIL.strip() or "onboarding@resend.dev"
@@ -583,101 +611,124 @@ def send_email(subject, changes, shows, movie_info):
 
     now_str = datetime.now().strftime("%d %b %Y, %I:%M %p")
     movie_name = movie_info.get("name", "Movie")
+    watch_label = watch.get("name", "")
 
-    # Build changes HTML
-    changes_html = ""
+    # ── WHAT CHANGED — the whole point of the email, so it leads. ──────────
     if changes:
-        rows = "".join(
-            f'<li style="padding:3px 0;font-size:14px;">{escape(c)}</li>'
+        change_rows = "".join(
+            f'<tr><td style="padding:6px 10px;font-size:14px;color:#111827;'
+            f'border-bottom:1px solid #fde68a;">{escape(prettify_change(c))}'
+            f'</td></tr>'
             for c in changes
         )
         changes_html = f"""
-        <h3 style="margin:0 0 8px 0;font-size:15px;font-weight:bold;color:#333;">
-            Changes Detected
-        </h3>
-        <ul style="margin:0 0 20px 0;padding-left:20px;line-height:1.6;color:#333;">
-            {rows}
-        </ul>"""
+    <table role="presentation" width="100%" style="border-collapse:collapse;
+           background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;
+           margin:0 0 22px 0;">
+        <tr><td style="padding:10px 10px 4px 10px;font-size:12px;
+               font-weight:700;letter-spacing:.04em;color:#b45309;
+               text-transform:uppercase;">⚡ What changed since the last alert</td></tr>
+        {change_rows}
+    </table>"""
+    else:
+        changes_html = ""
 
-    # Build shows section grouped by venue
-    venue_groups = {}
+    # ── CURRENT SHOWTIMES — grouped by date, each date with a Book link. ───
+    by_date = {}
     for s in shows:
-        venue_groups.setdefault(s.venue_name, []).append(s)
+        by_date.setdefault(s.date_code, []).append(s)
+
+    def badge(cat):
+        lbl, emoji, fg, bg = STATUS_STYLE.get(cat.status,
+                                              ("UNKNOWN", "⚪", "#374151", "#f3f4f6"))
+        return (
+            f'<span style="display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;'
+            f'font-size:12px;border-radius:12px;color:{fg};background:{bg};'
+            f'white-space:nowrap;">{emoji} {escape(cat.name)} '
+            f'₹{escape(cat.price)} · {lbl}</span>'
+        )
 
     shows_html = ""
-    for vname, vshows in venue_groups.items():
-        show_rows = ""
-        for s in vshows:
-            cats = " | ".join(
-                f"{escape(c.name)} Rs.{escape(c.price)} ({_cat_status_label(c.status)})"
-                for c in s.categories
-            )
-            fmt = f" [{escape(s.screen_attr)}]" if s.screen_attr else ""
-            show_rows += (
+    for dc in sorted(by_date):
+        link = booking_url(watch, dc)
+        rows = ""
+        for s in by_date[dc]:
+            fmt = f' <span style="color:#6b7280;">[{escape(s.screen_attr)}]</span>' \
+                  if s.screen_attr else ""
+            badges = "".join(badge(c) for c in s.categories)
+            rows += (
                 f'<tr>'
-                f'<td style="padding:5px 8px;border-bottom:1px solid #ddd;'
-                f'font-size:13px;vertical-align:top;">'
-                f'{escape(s.time)}{fmt}</td>'
-                f'<td style="padding:5px 8px;border-bottom:1px solid #ddd;'
-                f'font-size:13px;vertical-align:top;">'
-                f'{cats}</td>'
+                f'<td style="padding:8px 10px;border-top:1px solid #eee;'
+                f'font-size:14px;font-weight:600;white-space:nowrap;'
+                f'vertical-align:top;color:#111827;">{escape(s.time)}{fmt}</td>'
+                f'<td style="padding:6px 10px;border-top:1px solid #eee;">{badges}</td>'
                 f'</tr>'
             )
-
         shows_html += f"""
-        <p style="margin:14px 0 4px 0;font-size:14px;font-weight:bold;color:#333;">
-            {escape(vname)}
-        </p>
-        <table style="width:100%;border-collapse:collapse;font-size:13px;">
-            <tr style="background:#f5f5f5;">
-                <th style="padding:5px 8px;text-align:left;border-bottom:1px solid #ddd;
-                           font-weight:bold;">Time</th>
-                <th style="padding:5px 8px;text-align:left;border-bottom:1px solid #ddd;
-                           font-weight:bold;">Categories</th>
-            </tr>
-            {show_rows}
-        </table>"""
+    <table role="presentation" width="100%" style="border-collapse:collapse;
+           border:1px solid #e5e7eb;border-radius:8px;margin:0 0 16px 0;">
+        <tr><td colspan="2" style="padding:10px;background:#f9fafb;
+               border-bottom:1px solid #e5e7eb;border-radius:8px 8px 0 0;">
+            <span style="font-size:15px;font-weight:700;color:#111827;">
+                📅 {escape(fmt_date(dc))}</span>
+            <a href="{escape(link)}" style="float:right;background:#2563eb;
+               color:#fff;text-decoration:none;font-size:13px;font-weight:600;
+               padding:6px 14px;border-radius:6px;">Book on BookMyShow →</a>
+        </td></tr>
+        {rows}
+    </table>"""
+
+    if not shows_html:
+        shows_html = ('<p style="font-size:14px;color:#6b7280;">No matching '
+                      'showtimes are listed yet — you\'ll get another alert when '
+                      'they appear.</p>')
 
     html = f"""<!doctype html>
 <html>
-<head><meta charset="utf-8"></head>
-<body style="margin:0;padding:24px;font-family:Arial,Helvetica,sans-serif;
-             font-size:14px;color:#333;background:#fff;">
-    <h2 style="margin:0 0 4px 0;font-size:18px;color:#111;">
-        BMS Alert: {escape(movie_name)}
-    </h2>
-    <p style="margin:0 0 20px 0;font-size:13px;color:#666;">
-        {escape(now_str)}
-    </p>
-    <hr style="border:none;border-top:1px solid #ddd;margin:0 0 20px 0;">
-    {changes_html}
-    <h3 style="margin:0 0 8px 0;font-size:15px;font-weight:bold;color:#333;">
-        Current Showtimes
-    </h3>
-    {shows_html}
-    <p style="margin:24px 0 0 0;font-size:12px;color:#999;">
-        This is an automated alert from BMS Ticket Notifier.
-    </p>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:20px;font-family:-apple-system,Segoe UI,Arial,sans-serif;
+             font-size:14px;color:#111827;background:#f3f4f6;">
+  <table role="presentation" width="100%" style="max-width:600px;margin:0 auto;
+         background:#fff;border-radius:10px;padding:22px;">
+    <tr><td>
+      <div style="font-size:19px;font-weight:800;color:#111827;">
+        🎬 {escape(movie_name)}</div>
+      <div style="font-size:13px;color:#6b7280;margin:2px 0 18px 0;">
+        Watch: <b>{escape(watch_label)}</b> · {escape(now_str)}</div>
+      {changes_html}
+      <div style="font-size:12px;font-weight:700;letter-spacing:.04em;
+           color:#374151;text-transform:uppercase;margin:0 0 10px 0;">
+        🎟️ Current showtimes</div>
+      {shows_html}
+      <div style="font-size:11px;color:#9ca3af;margin-top:18px;
+           border-top:1px solid #eee;padding-top:12px;">
+        Premium seats can vanish within minutes of a show being listed — treat
+        this as "check now", not a reservation. Automated alert · BMS Notifier.</div>
+    </td></tr>
+  </table>
 </body>
 </html>"""
 
-    # Build plain-text version with full show details
-    plain_lines = [subject, "", f"Checked at: {now_str}", ""]
+    # ── Plain-text fallback (same information, links inline). ──────────────
+    plain_lines = [f"{movie_name} — watch: {watch_label}", now_str, ""]
     if changes:
-        plain_lines.append("Changes Detected:")
-        plain_lines.extend(f"  - {c}" for c in changes)
+        plain_lines.append("WHAT CHANGED SINCE LAST ALERT:")
+        plain_lines.extend(f"  - {prettify_change(c)}" for c in changes)
         plain_lines.append("")
-    plain_lines.append("Current Showtimes:")
-    for vname, vshows in venue_groups.items():
-        plain_lines.append(f"\n{vname}")
-        for s in vshows:
+    plain_lines.append("CURRENT SHOWTIMES:")
+    for dc in sorted(by_date):
+        plain_lines.append(f"\n{fmt_date(dc)}  ->  {booking_url(watch, dc)}")
+        for s in by_date[dc]:
+            fmt = f" [{s.screen_attr}]" if s.screen_attr else ""
             cats = " | ".join(
-                f"{c.name} Rs.{c.price} ({_cat_status_label(c.status)})"
+                f"{c.name} ₹{c.price} ({_cat_status_label(c.status)})"
                 for c in s.categories
             )
-            fmt = f" [{s.screen_attr}]" if s.screen_attr else ""
             plain_lines.append(f"  {s.time}{fmt} - {cats}")
-    plain_lines.extend(["", "This is an automated alert from BMS Ticket Notifier."])
+    if not by_date:
+        plain_lines.append("  (no matching showtimes listed yet)")
+    plain_lines.extend(["", "Premium seats can vanish within minutes of listing.",
+                        "Automated alert from BMS Notifier."])
     plain = "\n".join(plain_lines)
 
     try:
@@ -819,7 +870,7 @@ def _check_watch(w, all_shows, all_dates, movie_info, old_state, new_state):
         send_email(
             f"BMS Alert: {movie_info['name']} ({w['name']}) — "
             f"{len(changes)} change(s)",
-            changes, filtered, movie_info,
+            changes, filtered, movie_info, w,
         )
     else:
         print(f"     ✅ no changes")
