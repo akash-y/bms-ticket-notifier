@@ -231,13 +231,13 @@
       "20260729": "BOOKABLE",
       "20260730": "NOT_OPEN",
       "20260731": "NOT_OPEN",
-      "20260801": "NOT_LISTED"
+      "20260801": "NOT_OPEN"
     }
   },
   "pcx-prasads-aug1": {
     "shows": {},
     "dates": {
-      "20260801": "NOT_LISTED"
+      "20260801": "NOT_OPEN"
     }
   }
 }
