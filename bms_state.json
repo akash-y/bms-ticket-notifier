@@ -55,7 +55,7 @@
         "date": "20260728",
         "cat": "GOLD",
         "price": "295.00",
-        "status": "1"
+        "status": "2"
       },
       "ALUC|3342|20260728|GOLD.": {
         "venue": "ALLU Cinemas: Kokapet",
@@ -87,7 +87,7 @@
         "date": "20260728",
         "cat": "GOLD",
         "price": "295.00",
-        "status": "1"
+        "status": "2"
       },
       "ALUC|3343|20260728|GOLD.": {
         "venue": "ALLU Cinemas: Kokapet",
@@ -119,7 +119,7 @@
         "date": "20260728",
         "cat": "GOLD",
         "price": "295.00",
-        "status": "1"
+        "status": "2"
       },
       "ALUC|3344|20260728|GOLD.": {
         "venue": "ALLU Cinemas: Kokapet",
@@ -183,7 +183,7 @@
         "date": "20260729",
         "cat": "GOLD",
         "price": "295.00",
-        "status": "1"
+        "status": "2"
       },
       "ALUC|3336|20260729|GOLD.": {
         "venue": "ALLU Cinemas: Kokapet",
@@ -215,7 +215,7 @@
         "date": "20260729",
         "cat": "GOLD",
         "price": "295.00",
-        "status": "1"
+        "status": "2"
       },
       "ALUC|3346|20260729|GOLD.": {
         "venue": "ALLU Cinemas: Kokapet",
