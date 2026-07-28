@@ -15,7 +15,7 @@
         "date": "20260728",
         "cat": "DIRECTOR CHOICE",
         "price": "350.00",
-        "status": "0"
+        "status": "1"
       },
       "ALUC|3344|20260728|GOLD": {
         "venue": "ALLU Cinemas: Kokapet",
@@ -205,7 +205,7 @@
   "pcx-prasads-aug1": {
     "shows": {},
     "dates": {
-      "20260801": "NOT_OPEN"
+      "20260801": "BOOKABLE"
     }
   }
 }
